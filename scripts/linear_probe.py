@@ -104,6 +104,10 @@ def train_linear_probe(model, train_loader, val_loader, device, run_name, in_cha
         
         if val_acc > best_val_acc:
             best_val_acc = val_acc
+            # Save the best model
+            import os
+            os.makedirs("data/pretrained", exist_ok=True)
+            torch.save(model.state_dict(), f"data/pretrained/best_{run_name}.pth")
             
         wandb.log({
             f"{run_name}/epoch": epoch + 1,
