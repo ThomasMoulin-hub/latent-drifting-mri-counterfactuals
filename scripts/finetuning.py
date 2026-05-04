@@ -212,15 +212,35 @@ def main():
     
     # Load dataset
     dataset = OASISDataset(csv_path=csv_path, data_dir=data_dir)
-    print(f"Dataset loaded with {len(dataset)} samples.")
+    print(f"Dataset loaded with {len(dataset)} slices.")
     
-    # Split dataset 80/10/10
-    total_size = len(dataset)
-    train_size = int(0.8 * total_size)
-    val_size = int(0.1 * total_size)
-    test_size = total_size - train_size - val_size
+    # Split dataset 80/10/10 at the PATIENT level to prevent data leakage
+    # 1. Get unique patients
+    unique_patients = dataset.df['patient_id'].unique()
+    np.random.seed(42)
+    np.random.shuffle(unique_patients)
     
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size], generator=torch.Generator().manual_seed(42))
+    # 2. Calculate split sizes based on unique patients
+    total_patients = len(unique_patients)
+    train_p_size = int(0.8 * total_patients)
+    val_p_size = int(0.1 * total_patients)
+    
+    train_patients = unique_patients[:train_p_size]
+    val_patients = unique_patients[train_p_size:train_p_size + val_p_size]
+    test_patients = unique_patients[train_p_size + val_p_size:]
+    
+    # 3. Create subsets based on patient lists
+    train_indices = dataset.df.index[dataset.df['patient_id'].isin(train_patients)].tolist()
+    val_indices = dataset.df.index[dataset.df['patient_id'].isin(val_patients)].tolist()
+    test_indices = dataset.df.index[dataset.df['patient_id'].isin(test_patients)].tolist()
+    
+    train_dataset = torch.utils.data.Subset(dataset, train_indices)
+    val_dataset = torch.utils.data.Subset(dataset, val_indices)
+    test_dataset = torch.utils.data.Subset(dataset, test_indices)
+    
+    print(f"Data Split - Train: {len(train_dataset)} slices ({len(train_patients)} patients), "
+          f"Val: {len(val_dataset)} slices ({len(val_patients)} patients), "
+          f"Test: {len(test_dataset)} slices ({len(test_patients)} patients)")
     
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)

@@ -28,8 +28,9 @@ def preprocess_oasis(
     raw_dir: str,
     demographic_path: str,
     processed_dir: str,
-    num_slices: int = 3,
-    size: int = 128
+    start_idx: int = 100,
+    end_idx: int = 140,
+    size: int = 224
 ):
     raw_path = Path(raw_dir)
     proc_path = Path(processed_dir)
@@ -85,14 +86,18 @@ def preprocess_oasis(
         data_tensor = torch.from_numpy(data).unsqueeze(0) 
         processed_volume = transforms(data_tensor).numpy()
         
-        # Extraction des coupes axiales centrales
-        center = size // 2
-        start = center - (num_slices // 2)
+        # Extraction basée sur la méthode empirique (Normalisation FreeSurfer vers espace Talairach/MNI)
+        # La plage cible sur l'axe Z (axial) pour englober les ventricules et l'hippocampe
+        num_slices = end_idx - start_idx
         
-        for i in range(num_slices):
-            slice_idx = start + i
+        for slice_idx in range(start_idx, end_idx):
             # Dans brain.mgz de FreeSurfer, l'orientation est souvent telle que l'axe 2 est axial
-            slice_2d = processed_volume[:, :, slice_idx]
+            # Attention: processed_volume a été redimensionné de 256 à 'size' (224). 
+            # Les indices start_idx/end_idx donnés pour un espace 256 doivent être mis à l'échelle.
+            scale_factor = size / 256.0
+            scaled_slice_idx = int(slice_idx * scale_factor)
+            
+            slice_2d = processed_volume[:, :, scaled_slice_idx]
             
             slice_name = f"{patient_id}_slice{slice_idx:03d}.npy"
             np.save(proc_path / slice_name, slice_2d)
@@ -115,8 +120,9 @@ if __name__ == "__main__":
     parser.add_argument("--raw_dir", type=str, default="data/OASIS-1/FreeSurfer/oasis_cs_freesurfer_disc1/disc1")
     parser.add_argument("--demographic_path", type=str, default="data/OASIS-1/DemographicAndClinicalData/oasis_cross-sectional-5708aa0a98d82080.xlsx")
     parser.add_argument("--processed_dir", type=str, default="data/processed")
-    parser.add_argument("--num_slices", type=int, default=3)
-    parser.add_argument("--size", type=int, default=128)
+    parser.add_argument("--start_idx", type=int, default=100, help="Starting Z index for the ROI box (in native 256 space)")
+    parser.add_argument("--end_idx", type=int, default=140, help="Ending Z index for the ROI box (in native 256 space)")
+    parser.add_argument("--size", type=int, default=224, help="Target size for spatial resizing before extraction")
     args = parser.parse_args()
     
-    preprocess_oasis(args.raw_dir, args.demographic_path, args.processed_dir, args.num_slices, args.size)
+    preprocess_oasis(args.raw_dir, args.demographic_path, args.processed_dir, args.start_idx, args.end_idx, args.size)

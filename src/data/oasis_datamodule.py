@@ -60,21 +60,29 @@ class OASISDataModule(LightningDataModule):
                 data_dir=self.hparams.data_dir
             )
             
-            num_total = len(full_dataset)
+            # Use patient-level splitting to prevent data leakage
+            import numpy as np
+            unique_patients = full_dataset.df['patient_id'].unique()
+            np.random.seed(42)
+            np.random.shuffle(unique_patients)
+            
+            total_patients = len(unique_patients)
             if isinstance(self.hparams.train_val_test_split[0], float):
-                num_train = int(self.hparams.train_val_test_split[0] * num_total)
-                num_val = int(self.hparams.train_val_test_split[1] * num_total)
-                num_test = num_total - num_train - num_val
-                split_lengths = [num_train, num_val, num_test]
+                train_p_size = int(self.hparams.train_val_test_split[0] * total_patients)
+                val_p_size = int(self.hparams.train_val_test_split[1] * total_patients)
             else:
-                split_lengths = self.hparams.train_val_test_split
+                # Fallback if split_lengths were passed as absolute integers (unlikely for patient split, but safe)
+                train_p_size = int(self.hparams.train_val_test_split[0])
+                val_p_size = int(self.hparams.train_val_test_split[1])
                 
-            # Use random_split to get indices
-            train_subset, val_subset, test_subset = random_split(
-                dataset=full_dataset,
-                lengths=split_lengths,
-                generator=torch.Generator().manual_seed(42),
-            )
+            train_patients = unique_patients[:train_p_size]
+            val_patients = unique_patients[train_p_size:train_p_size + val_p_size]
+            test_patients = unique_patients[train_p_size + val_p_size:]
+            
+            # Map patient lists back to row indices in the dataframe
+            train_indices = full_dataset.df.index[full_dataset.df['patient_id'].isin(train_patients)].tolist()
+            val_indices = full_dataset.df.index[full_dataset.df['patient_id'].isin(val_patients)].tolist()
+            test_indices = full_dataset.df.index[full_dataset.df['patient_id'].isin(test_patients)].tolist()
             
             # Re-instantiate datasets with specific transforms for each split
             self.data_train = OASISDataset(
@@ -83,21 +91,21 @@ class OASISDataModule(LightningDataModule):
                 transform=self.train_transforms
             )
             # Filter by indices
-            self.data_train.df = self.data_train.df.iloc[train_subset.indices].reset_index(drop=True)
+            self.data_train.df = self.data_train.df.iloc[train_indices].reset_index(drop=True)
             
             self.data_val = OASISDataset(
                 csv_path=self.hparams.csv_path,
                 data_dir=self.hparams.data_dir,
                 transform=self.val_transforms
             )
-            self.data_val.df = self.data_val.df.iloc[val_subset.indices].reset_index(drop=True)
+            self.data_val.df = self.data_val.df.iloc[val_indices].reset_index(drop=True)
             
             self.data_test = OASISDataset(
                 csv_path=self.hparams.csv_path,
                 data_dir=self.hparams.data_dir,
                 transform=self.val_transforms
             )
-            self.data_test.df = self.data_test.df.iloc[test_subset.indices].reset_index(drop=True)
+            self.data_test.df = self.data_test.df.iloc[test_indices].reset_index(drop=True)
 
     def train_dataloader(self) -> DataLoader[Any]:
         return DataLoader(
