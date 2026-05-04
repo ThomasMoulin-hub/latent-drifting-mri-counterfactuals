@@ -48,7 +48,9 @@ def visualize_patient_slices(data_dir="data/processed", output_file="patient_sli
             
             if slice_path.exists():
                 img = np.load(slice_path)
-                axes[i, j].imshow(img, cmap='gray')
+                # vmin=0, vmax=1 ensures the true absolute contrast is displayed, preventing 
+                # matplotlib from artificially brightening dark slices.
+                axes[i, j].imshow(img, cmap='gray', vmin=0, vmax=1)
                 axes[i, j].axis('off')
                 slice_num = p_df.iloc[idx]['slice_idx']
                 if j == 0:

@@ -99,6 +99,9 @@ def preprocess_oasis(
             
             slice_2d = processed_volume[:, :, scaled_slice_idx]
             
+            # Correction d'orientation : Rotation de 90 degrés pour que la scissure soit verticale
+            slice_2d = np.rot90(slice_2d)
+            
             slice_name = f"{patient_id}_slice{slice_idx:03d}.npy"
             np.save(proc_path / slice_name, slice_2d)
             
