@@ -14,11 +14,15 @@ import logging
 import warnings
 from tqdm import tqdm
 import wandb
+import argparse
+import os
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO)
 
 def train_linear_probe(model, train_loader, val_loader, device, run_name, in_channels=3, epochs=15, lr=1e-3):
+    wandb.init(project="lightning-hydra-template", name=run_name, group="linear_probing", reinit=True)
+    
     # Only optimize parameters that require gradients (the new classifier layer)
     params_to_update = [p for p in model.parameters() if p.requires_grad]
     
@@ -105,24 +109,29 @@ def train_linear_probe(model, train_loader, val_loader, device, run_name, in_cha
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             # Save the best model
-            import os
             os.makedirs("data/pretrained", exist_ok=True)
             torch.save(model.state_dict(), f"data/pretrained/best_{run_name}.pth")
             
         wandb.log({
-            f"{run_name}/epoch": epoch + 1,
-            f"{run_name}/train_loss": train_loss_avg,
-            f"{run_name}/train_acc": train_acc,
-            f"{run_name}/val_loss": val_loss_avg,
-            f"{run_name}/val_acc": val_acc,
-            f"{run_name}/best_val_acc": best_val_acc,
+            "epoch": epoch + 1,
+            "train/loss": train_loss_avg,
+            "train/acc": train_acc,
+            "val/loss": val_loss_avg,
+            "val/acc": val_acc,
+            "val/acc_best": best_val_acc,
         })
             
+    wandb.finish()
     return best_val_acc
 
 def main():
-    # Initialize wandb
-    wandb.init(project="lightning-hydra-template", name="linear_probing_comparison", group="linear_probing")
+    parser = argparse.ArgumentParser(description="Linear Probing for OASIS Dataset")
+    parser.add_argument("--epochs", type=int, default=25, help="Number of epochs to train")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    args = parser.parse_args()
+    
+    epochs = args.epochs
+    lr = args.lr
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -142,8 +151,7 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
     
-    epochs = 15
-    lr = 1e-3
+    print(f"Training for {epochs} epochs with learning rate {lr}")
     
     # ---------------------------------------------------------
     # 1. DenseNet-121 (Alzheimer Pretrained)
@@ -219,8 +227,6 @@ def main():
     print(f"DenseNet-121 (ImageNet Weights)  Best Val Acc : {imgnet_best_acc*100:.2f}%")
     print(f"ResNet-50    (RadImageNet)       Best Val Acc : {rn_best_acc*100:.2f}%")
     print("="*60)
-    
-    wandb.finish()
 
 if __name__ == "__main__":
     main()
