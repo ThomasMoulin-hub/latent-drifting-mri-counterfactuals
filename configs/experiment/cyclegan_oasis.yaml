@@ -1,0 +1,19 @@
+# @package _global_
+
+defaults:
+  - override /data: oasis
+  - override /model: cyclegan
+  - override /logger: wandb
+  - override /trainer: default
+
+tags: ["oasis", "cyclegan"]
+
+seed: 42
+
+trainer:
+  min_epochs: 1
+  max_epochs: 100
+  accelerator: auto
+
+data:
+  batch_size: 8

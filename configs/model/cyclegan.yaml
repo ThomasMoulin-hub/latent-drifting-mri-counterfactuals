@@ -1,0 +1,52 @@
+_target_: src.systems.cyclegan_system.CycleGANSystem
+
+optimizer_g:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.0002
+  betas: [0.5, 0.999]
+
+optimizer_d:
+  _target_: torch.optim.Adam
+  _partial_: true
+  lr: 0.0002
+  betas: [0.5, 0.999]
+
+net_g_a2b:
+  _target_: src.models.swin_unet.SwinUNetGenerator
+  spatial_dims: 2
+  in_channels: 1
+  out_channels: 1
+  feature_size: 24
+
+net_g_b2a:
+  _target_: src.models.swin_unet.SwinUNetGenerator
+  spatial_dims: 2
+  in_channels: 1
+  out_channels: 1
+  feature_size: 24
+
+net_d_a:
+  _target_: src.models.discriminator.PatchGANDiscriminator
+  spatial_dims: 2
+  in_channels: 1
+  num_layers: 3
+  hidden_channels: 64
+
+net_d_b:
+  _target_: src.models.discriminator.PatchGANDiscriminator
+  spatial_dims: 2
+  in_channels: 1
+  num_layers: 3
+  hidden_channels: 64
+
+evaluator:
+  _target_: src.models.classifier.OASISClassifier
+  in_channels: 1
+  num_classes: 2
+  spatial_dims: 2
+  pretrained: true
+  weights_path: "data/pretrained/alzheimer_cnn_model.pth"
+
+lambda_cycle: 10.0
+lambda_identity: 0.5
