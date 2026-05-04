@@ -18,7 +18,8 @@ rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
 from src.models.classifier import OASISClassifier
 from torchvision.models.densenet import DenseNet
-torch.serialization.add_safe_globals([OASISClassifier, DenseNet])
+import torch.nn.modules.container
+torch.serialization.add_safe_globals([OASISClassifier, DenseNet, torch.nn.modules.container.Sequential])
 # ------------------------------------------------------------------------------------ #
 # the setup_root above is equivalent to:
 # - adding project root dir to PYTHONPATH

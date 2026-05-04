@@ -9,6 +9,12 @@ from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
+
+import torch
+from src.models.classifier import OASISClassifier
+from torchvision.models.densenet import DenseNet
+import torch.nn.modules.container
+torch.serialization.add_safe_globals([OASISClassifier, DenseNet, torch.nn.modules.container.Sequential])
 # ------------------------------------------------------------------------------------ #
 # the setup_root above is equivalent to:
 # - adding project root dir to PYTHONPATH
