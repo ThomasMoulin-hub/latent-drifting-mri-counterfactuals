@@ -16,10 +16,12 @@ from omegaconf import DictConfig
 
 rootutils.setup_root(__file__, indicator=".project-root", pythonpath=True)
 
-from src.models.classifier import OASISClassifier
-from torchvision.models.densenet import DenseNet
-import torch.nn.modules.container
-torch.serialization.add_safe_globals([OASISClassifier, DenseNet, torch.nn.modules.container.Sequential])
+# Patch torch.load to always use weights_only=False regardless of what Lightning passes
+original_torch_load = torch.load
+def patched_torch_load(*args, **kwargs):
+    kwargs['weights_only'] = False
+    return original_torch_load(*args, **kwargs)
+torch.load = patched_torch_load
 # ------------------------------------------------------------------------------------ #
 # the setup_root above is equivalent to:
 # - adding project root dir to PYTHONPATH
