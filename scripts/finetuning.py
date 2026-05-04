@@ -238,13 +238,22 @@ def main():
     val_dataset = torch.utils.data.Subset(dataset, val_indices)
     test_dataset = torch.utils.data.Subset(dataset, test_indices)
     
+    train_labels = dataset.df.iloc[train_indices]['label'].value_counts().to_dict()
+    val_labels = dataset.df.iloc[val_indices]['label'].value_counts().to_dict()
+    test_labels = dataset.df.iloc[test_indices]['label'].value_counts().to_dict()
+    
     print(f"Data Split - Train: {len(train_dataset)} slices ({len(train_patients)} patients), "
           f"Val: {len(val_dataset)} slices ({len(val_patients)} patients), "
           f"Test: {len(test_dataset)} slices ({len(test_patients)} patients)")
+          
+    print(f"Class Distribution (Slices):")
+    print(f"  Train: AD = {train_labels.get('AD', 0)}, CN = {train_labels.get('CN', 0)}")
+    print(f"  Val  : AD = {val_labels.get('AD', 0)}, CN = {val_labels.get('CN', 0)}")
+    print(f"  Test : AD = {test_labels.get('AD', 0)}, CN = {test_labels.get('CN', 0)}")
     
-    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
-    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
-    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=0)
+    train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=3, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=3, pin_memory=True)
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=3, pin_memory=True)
     
     print(f"Training in '{mode}' mode for {epochs} epochs with learning rate {lr}")
     
@@ -315,7 +324,7 @@ def main():
     rn_best_acc, rn_test_acc = train_head(resnet_rad, train_loader, val_loader, test_loader, device, run_name="resnet_radimagenet", mode=mode, in_channels=3, epochs=epochs, lr=lr)
     
     print("\n" + "="*60)
-    print(f"FINAL {mode.upper()} HEAD FINETUNING RESULTS (Train: {train_size}, Val: {val_size}, Test: {test_size} samples)")
+    print(f"FINAL {mode.upper()} HEAD FINETUNING RESULTS (Train: {len(train_dataset)}, Val: {len(val_dataset)}, Test: {len(test_dataset)} samples)")
     print("="*60)
     print(f"DenseNet-121 (Alzheimer Weights) Best Val Acc : {alz_best_acc*100:.2f}%  |  Test Acc: {alz_test_acc*100:.2f}%")
     print(f"DenseNet-121 (ImageNet Weights)  Best Val Acc : {imgnet_best_acc*100:.2f}%  |  Test Acc: {imgnet_test_acc*100:.2f}%")
