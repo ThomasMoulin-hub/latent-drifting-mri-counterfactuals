@@ -3,14 +3,8 @@
 from typing import Any, Dict, List, Optional, Tuple
 
 import hydra
-try:
-    import hydra._internal.utils
-    class MyLazyCompletionHelp(str):
-        def __str__(self):
-            return "Install completion for the current shell."
-    hydra._internal.utils.LazyCompletionHelp = MyLazyCompletionHelp
-except Exception:
-    pass
+import argparse
+argparse.ArgumentParser._check_help = lambda self, action: None
 
 import lightning as L
 import rootutils

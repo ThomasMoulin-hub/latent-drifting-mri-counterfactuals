@@ -1,6 +1,8 @@
 from typing import Any, Dict, List, Tuple
 
 import hydra
+import argparse
+argparse.ArgumentParser._check_help = lambda self, action: None
 import rootutils
 from lightning import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
