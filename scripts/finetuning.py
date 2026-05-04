@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 import torchvision.models as models
-import torchvision.transforms as T
 from torch.utils.data import DataLoader, random_split
 from src.data.components.oasis_dataset import OASISDataset
 from src.models.classifier import OASISClassifier
@@ -20,10 +19,39 @@ import os
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO)
 
-def train_linear_probe(model, train_loader, val_loader, test_loader, device, run_name, in_channels=3, epochs=15, lr=1e-3):
-    wandb.init(project="lightning-hydra-template", name=run_name, group="linear_probing", reinit=True)
+def build_head(in_features, num_classes=2, mode="linear"):
+    """
+    Builds the classification head.
+    - 'linear': Standard Linear Probing (1 layer)
+    - 'mlp': Richer finetuning with 2 hidden layers, BatchNorm, and Dropout
+    """
+    if mode == "linear":
+        return nn.Linear(in_features, num_classes)
+    elif mode == "mlp":
+        # Architecture advice: 
+        # A 2-hidden layer MLP (512 -> 128) is an excellent standard for 1024/2048 feature extractors.
+        # It adds enough non-linearity to map complex combinations of visual features to Alzheimer's markers,
+        # but stays small enough to prevent massive overfitting. Dropout and BatchNorm are crucial here.
+        return nn.Sequential(
+            nn.Linear(in_features, 512),
+            nn.BatchNorm1d(512),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(512, 128),
+            nn.BatchNorm1d(128),
+            nn.ReLU(),
+            nn.Dropout(0.3),
+            nn.Linear(128, num_classes)
+        )
+    else:
+        raise ValueError("Mode must be 'linear' or 'mlp'")
+
+def train_head(model, train_loader, val_loader, test_loader, device, run_name, mode="linear", in_channels=3, epochs=15, lr=1e-3):
+    # Differentiate WandB group based on mode
+    group_name = "linear_probing" if mode == "linear" else "mlp_finetuning"
+    wandb.init(project="lightning-hydra-template", name=f"{run_name}_{mode}", group=group_name, reinit=True)
     
-    # Only optimize parameters that require gradients (the new classifier layer)
+    # Only optimize parameters that require gradients (the new head)
     params_to_update = [p for p in model.parameters() if p.requires_grad]
     
     criterion = nn.CrossEntropyLoss()
@@ -110,7 +138,7 @@ def train_linear_probe(model, train_loader, val_loader, test_loader, device, run
             best_val_acc = val_acc
             # Save the best model
             os.makedirs("data/pretrained", exist_ok=True)
-            torch.save(model.state_dict(), f"data/pretrained/best_{run_name}.pth")
+            torch.save(model.state_dict(), f"data/pretrained/best_{run_name}_{mode}.pth")
             
         wandb.log({
             "epoch": epoch + 1,
@@ -122,9 +150,9 @@ def train_linear_probe(model, train_loader, val_loader, test_loader, device, run
         })
             
     # --- TEST PHASE ---
-    print(f"\n--- Testing Best Model for {run_name} ---")
+    print(f"\n--- Testing Best Model for {run_name} ({mode}) ---")
     try:
-        model.load_state_dict(torch.load(f"data/pretrained/best_{run_name}.pth", weights_only=False))
+        model.load_state_dict(torch.load(f"data/pretrained/best_{run_name}_{mode}.pth", weights_only=False))
     except Exception as e:
         print(f"Could not load best model weights for testing: {e}")
         
@@ -163,13 +191,16 @@ def train_linear_probe(model, train_loader, val_loader, test_loader, device, run
     return best_val_acc, test_acc
 
 def main():
-    parser = argparse.ArgumentParser(description="Linear Probing for OASIS Dataset")
+    parser = argparse.ArgumentParser(description="Head Finetuning for OASIS Dataset")
     parser.add_argument("--epochs", type=int, default=25, help="Number of epochs to train")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate")
+    parser.add_argument("--mode", type=str, default="linear", choices=["linear", "mlp"], 
+                        help="Head architecture: 'linear' for simple linear probing, 'mlp' for deep fully connected layers")
     args = parser.parse_args()
     
     epochs = args.epochs
     lr = args.lr
+    mode = args.mode
     
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
@@ -193,13 +224,13 @@ def main():
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=0)
     
-    print(f"Training for {epochs} epochs with learning rate {lr}")
+    print(f"Training in '{mode}' mode for {epochs} epochs with learning rate {lr}")
     
     # ---------------------------------------------------------
     # 1. DenseNet-121 (Alzheimer Pretrained)
     # ---------------------------------------------------------
     print("\n" + "="*60)
-    print("--- Linear Probing DenseNet-121 (Alzheimer Pretrained) ---")
+    print(f"--- {mode.upper()} Finetuning DenseNet-121 (Alzheimer Pretrained) ---")
     print("="*60)
     
     # Use the project's custom wrapper which loads the weights and handles 1-channel
@@ -209,18 +240,17 @@ def main():
     for param in alz_model.model.features.parameters():
         param.requires_grad = False
         
-    # Classifier is already correctly sized by OASISClassifier, but we ensure it requires grad
-    for param in alz_model.model.classifier.parameters():
-        param.requires_grad = True
-        
+    num_ftrs = alz_model.model.classifier.in_features
+    alz_model.model.classifier = build_head(num_ftrs, 2, mode=mode)
+    
     alz_model = alz_model.to(device)
-    alz_best_acc, alz_test_acc = train_linear_probe(alz_model, train_loader, val_loader, test_loader, device, run_name="densenet_alzheimer", in_channels=1, epochs=epochs, lr=lr)
+    alz_best_acc, alz_test_acc = train_head(alz_model, train_loader, val_loader, test_loader, device, run_name="densenet_alzheimer", mode=mode, in_channels=1, epochs=epochs, lr=lr)
 
     # ---------------------------------------------------------
     # 2. DenseNet-121 (ImageNet Pretrained)
     # ---------------------------------------------------------
     print("\n" + "="*60)
-    print("--- Linear Probing DenseNet-121 (ImageNet) ---")
+    print(f"--- {mode.upper()} Finetuning DenseNet-121 (ImageNet) ---")
     print("="*60)
     imgnet_model = models.densenet121(weights="IMAGENET1K_V1")
     
@@ -230,16 +260,16 @@ def main():
         
     # Replace and unfreeze classifier
     num_ftrs = imgnet_model.classifier.in_features
-    imgnet_model.classifier = nn.Linear(num_ftrs, 2)
+    imgnet_model.classifier = build_head(num_ftrs, 2, mode=mode)
     imgnet_model = imgnet_model.to(device)
     
-    imgnet_best_acc, imgnet_test_acc = train_linear_probe(imgnet_model, train_loader, val_loader, test_loader, device, run_name="densenet_imagenet", in_channels=3, epochs=epochs, lr=lr)
+    imgnet_best_acc, imgnet_test_acc = train_head(imgnet_model, train_loader, val_loader, test_loader, device, run_name="densenet_imagenet", mode=mode, in_channels=3, epochs=epochs, lr=lr)
     
     # ---------------------------------------------------------
     # 3. ResNet-50 (RadImageNet)
     # ---------------------------------------------------------
     print("\n" + "="*60)
-    print("--- Linear Probing ResNet-50 (RadImageNet) ---")
+    print(f"--- {mode.upper()} Finetuning ResNet-50 (RadImageNet) ---")
     print("="*60)
     resnet_rad = torch.hub.load('Warvito/radimagenet-models', 'radimagenet_resnet50', verbose=False)
     
@@ -251,7 +281,7 @@ def main():
     classifier = nn.Sequential(
         nn.AdaptiveAvgPool2d((1, 1)),
         nn.Flatten(),
-        nn.Linear(2048, 2)
+        build_head(2048, 2, mode=mode)
     )
     
     resnet_rad = nn.Sequential(
@@ -260,10 +290,10 @@ def main():
     )
     resnet_rad = resnet_rad.to(device)
     
-    rn_best_acc, rn_test_acc = train_linear_probe(resnet_rad, train_loader, val_loader, test_loader, device, run_name="resnet_radimagenet", in_channels=3, epochs=epochs, lr=lr)
+    rn_best_acc, rn_test_acc = train_head(resnet_rad, train_loader, val_loader, test_loader, device, run_name="resnet_radimagenet", mode=mode, in_channels=3, epochs=epochs, lr=lr)
     
     print("\n" + "="*60)
-    print(f"FINAL LINEAR PROBING RESULTS (Train: {train_size}, Val: {val_size}, Test: {test_size} samples)")
+    print(f"FINAL {mode.upper()} HEAD FINETUNING RESULTS (Train: {train_size}, Val: {val_size}, Test: {test_size} samples)")
     print("="*60)
     print(f"DenseNet-121 (Alzheimer Weights) Best Val Acc : {alz_best_acc*100:.2f}%  |  Test Acc: {alz_test_acc*100:.2f}%")
     print(f"DenseNet-121 (ImageNet Weights)  Best Val Acc : {imgnet_best_acc*100:.2f}%  |  Test Acc: {imgnet_test_acc*100:.2f}%")
