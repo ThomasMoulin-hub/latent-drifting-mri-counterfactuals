@@ -8,15 +8,17 @@ import torchvision.models as models
 import torchvision.transforms as T
 from torch.utils.data import DataLoader, random_split
 from src.data.components.oasis_dataset import OASISDataset
+from src.models.classifier import OASISClassifier
 import numpy as np
 import logging
 import warnings
 from tqdm import tqdm
+import wandb
 
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO)
 
-def train_linear_probe(model, train_loader, val_loader, device, epochs=15, lr=1e-3):
+def train_linear_probe(model, train_loader, val_loader, device, run_name, in_channels=3, epochs=15, lr=1e-3):
     # Only optimize parameters that require gradients (the new classifier layer)
     params_to_update = [p for p in model.parameters() if p.requires_grad]
     
@@ -32,7 +34,7 @@ def train_linear_probe(model, train_loader, val_loader, device, epochs=15, lr=1e
         train_total = 0
         
         # Training loop
-        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [Train]", leave=False):
+        for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs} [{run_name} Train]", leave=False):
             images = batch["image"].to(device) # (B, 1, H, W)
             targets = batch["label"].to(device)
             
@@ -40,12 +42,14 @@ def train_linear_probe(model, train_loader, val_loader, device, epochs=15, lr=1e
             images = (images + 1.0) / 2.0
             images = torch.clamp(images, 0.0, 1.0)
             
-            # Convert to 3 channels for backbone
-            images = images.repeat(1, 3, 1, 1)
-            
-            # ImageNet standard
-            mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(device)
-            std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(device)
+            # Convert to 3 channels for backbone if needed
+            if in_channels == 3:
+                images = images.repeat(1, 3, 1, 1)
+                mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(device)
+                std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(device)
+            else:
+                mean = torch.tensor([0.5]).view(1, 1, 1, 1).to(device)
+                std = torch.tensor([0.5]).view(1, 1, 1, 1).to(device)
             
             # Resize and normalize
             images = torch.nn.functional.interpolate(images, size=(224, 224), mode='bilinear', align_corners=False)
@@ -63,6 +67,7 @@ def train_linear_probe(model, train_loader, val_loader, device, epochs=15, lr=1e
             train_total += targets.size(0)
             
         train_acc = train_correct / train_total
+        train_loss_avg = train_loss / train_total
         
         # Validation loop
         model.eval()
@@ -71,13 +76,15 @@ def train_linear_probe(model, train_loader, val_loader, device, epochs=15, lr=1e
         val_total = 0
         
         with torch.no_grad():
-            for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [Val]", leave=False):
+            for batch in tqdm(val_loader, desc=f"Epoch {epoch+1}/{epochs} [{run_name} Val]", leave=False):
                 images = batch["image"].to(device)
                 targets = batch["label"].to(device)
                 
                 images = (images + 1.0) / 2.0
                 images = torch.clamp(images, 0.0, 1.0)
-                images = images.repeat(1, 3, 1, 1)
+                
+                if in_channels == 3:
+                    images = images.repeat(1, 3, 1, 1)
                 
                 images = torch.nn.functional.interpolate(images, size=(224, 224), mode='bilinear', align_corners=False)
                 images = (images - mean) / std
@@ -91,15 +98,28 @@ def train_linear_probe(model, train_loader, val_loader, device, epochs=15, lr=1e
                 val_total += targets.size(0)
                 
         val_acc = val_correct / val_total
+        val_loss_avg = val_loss / val_total
         
-        print(f"Epoch {epoch+1}/{epochs} - Train Loss: {train_loss/train_total:.4f}, Train Acc: {train_acc:.4f} | Val Loss: {val_loss/val_total:.4f}, Val Acc: {val_acc:.4f}")
+        print(f"Epoch {epoch+1}/{epochs} [{run_name}] - Train Loss: {train_loss_avg:.4f}, Train Acc: {train_acc:.4f} | Val Loss: {val_loss_avg:.4f}, Val Acc: {val_acc:.4f}")
         
         if val_acc > best_val_acc:
             best_val_acc = val_acc
             
+        wandb.log({
+            f"{run_name}/epoch": epoch + 1,
+            f"{run_name}/train_loss": train_loss_avg,
+            f"{run_name}/train_acc": train_acc,
+            f"{run_name}/val_loss": val_loss_avg,
+            f"{run_name}/val_acc": val_acc,
+            f"{run_name}/best_val_acc": best_val_acc,
+        })
+            
     return best_val_acc
 
 def main():
+    # Initialize wandb
+    wandb.init(project="lightning-hydra-template", name="linear_probing_comparison", group="linear_probing")
+    
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
@@ -118,26 +138,52 @@ def main():
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
     
-    # Hyperparameters
-    epochs = 15 # Increased epochs since we only train the last layer (linear probing)
-    lr = 1e-3   # Higher learning rate since we only train a single linear layer
+    epochs = 15
+    lr = 1e-3
     
+    # ---------------------------------------------------------
+    # 1. DenseNet-121 (Alzheimer Pretrained)
+    # ---------------------------------------------------------
+    print("\n" + "="*60)
+    print("--- Linear Probing DenseNet-121 (Alzheimer Pretrained) ---")
+    print("="*60)
+    
+    # Use the project's custom wrapper which loads the weights and handles 1-channel
+    alz_model = OASISClassifier(in_channels=1, pretrained=True, weights_path="data/pretrained/alzheimer_cnn_model.pth")
+    
+    # Freeze backbone
+    for param in alz_model.model.features.parameters():
+        param.requires_grad = False
+        
+    # Classifier is already correctly sized by OASISClassifier, but we ensure it requires grad
+    for param in alz_model.model.classifier.parameters():
+        param.requires_grad = True
+        
+    alz_model = alz_model.to(device)
+    alz_best_acc = train_linear_probe(alz_model, train_loader, val_loader, device, run_name="densenet_alzheimer", in_channels=1, epochs=epochs, lr=lr)
+
+    # ---------------------------------------------------------
+    # 2. DenseNet-121 (ImageNet Pretrained)
+    # ---------------------------------------------------------
     print("\n" + "="*60)
     print("--- Linear Probing DenseNet-121 (ImageNet) ---")
     print("="*60)
-    densenet = models.densenet121(weights="IMAGENET1K_V1")
+    imgnet_model = models.densenet121(weights="IMAGENET1K_V1")
     
     # Freeze backbone
-    for param in densenet.parameters():
+    for param in imgnet_model.parameters():
         param.requires_grad = False
         
     # Replace and unfreeze classifier
-    num_ftrs = densenet.classifier.in_features
-    densenet.classifier = nn.Linear(num_ftrs, 2)
-    densenet = densenet.to(device)
+    num_ftrs = imgnet_model.classifier.in_features
+    imgnet_model.classifier = nn.Linear(num_ftrs, 2)
+    imgnet_model = imgnet_model.to(device)
     
-    dn_best_acc = train_linear_probe(densenet, train_loader, val_loader, device, epochs=epochs, lr=lr)
+    imgnet_best_acc = train_linear_probe(imgnet_model, train_loader, val_loader, device, run_name="densenet_imagenet", in_channels=3, epochs=epochs, lr=lr)
     
+    # ---------------------------------------------------------
+    # 3. ResNet-50 (RadImageNet)
+    # ---------------------------------------------------------
     print("\n" + "="*60)
     print("--- Linear Probing ResNet-50 (RadImageNet) ---")
     print("="*60)
@@ -160,14 +206,17 @@ def main():
     )
     resnet_rad = resnet_rad.to(device)
     
-    rn_best_acc = train_linear_probe(resnet_rad, train_loader, val_loader, device, epochs=epochs, lr=lr)
+    rn_best_acc = train_linear_probe(resnet_rad, train_loader, val_loader, device, run_name="resnet_radimagenet", in_channels=3, epochs=epochs, lr=lr)
     
     print("\n" + "="*60)
     print(f"FINAL LINEAR PROBING RESULTS (Trained only last layer on {len(dataset)} samples)")
     print("="*60)
-    print(f"DenseNet-121 (ImageNet) Best Val Acc : {dn_best_acc*100:.2f}%")
-    print(f"ResNet-50 (RadImageNet) Best Val Acc : {rn_best_acc*100:.2f}%")
+    print(f"DenseNet-121 (Alzheimer Weights) Best Val Acc : {alz_best_acc*100:.2f}%")
+    print(f"DenseNet-121 (ImageNet Weights)  Best Val Acc : {imgnet_best_acc*100:.2f}%")
+    print(f"ResNet-50    (RadImageNet)       Best Val Acc : {rn_best_acc*100:.2f}%")
     print("="*60)
+    
+    wandb.finish()
 
 if __name__ == "__main__":
     main()
