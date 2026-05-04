@@ -234,13 +234,27 @@ def main():
     val_indices = dataset.df.index[dataset.df['patient_id'].isin(val_patients)].tolist()
     test_indices = dataset.df.index[dataset.df['patient_id'].isin(test_patients)].tolist()
     
-    train_dataset = torch.utils.data.Subset(dataset, train_indices)
-    val_dataset = torch.utils.data.Subset(dataset, val_indices)
-    test_dataset = torch.utils.data.Subset(dataset, test_indices)
+    # Apply aggressive Data Augmentation to the training set to prevent memorization of correlated slices
+    from monai.transforms import Compose, RandRotate, RandFlip, RandZoom, RandGaussianNoise
+    train_transform = Compose([
+        RandRotate(range_x=0.2, prob=0.5), # Rotation +/- ~11 degrees
+        RandFlip(spatial_axis=0, prob=0.5), # Horizontal flip
+        RandZoom(min_zoom=0.9, max_zoom=1.1, prob=0.5),
+        RandGaussianNoise(prob=0.2, std=0.05)
+    ])
     
-    train_labels = dataset.df.iloc[train_indices]['label'].value_counts().to_dict()
-    val_labels = dataset.df.iloc[val_indices]['label'].value_counts().to_dict()
-    test_labels = dataset.df.iloc[test_indices]['label'].value_counts().to_dict()
+    train_dataset = OASISDataset(csv_path=csv_path, data_dir=data_dir, transform=train_transform)
+    train_dataset.df = train_dataset.df.iloc[train_indices].reset_index(drop=True)
+    
+    val_dataset = OASISDataset(csv_path=csv_path, data_dir=data_dir)
+    val_dataset.df = val_dataset.df.iloc[val_indices].reset_index(drop=True)
+    
+    test_dataset = OASISDataset(csv_path=csv_path, data_dir=data_dir)
+    test_dataset.df = test_dataset.df.iloc[test_indices].reset_index(drop=True)
+    
+    train_labels = train_dataset.df['label'].value_counts().to_dict()
+    val_labels = val_dataset.df['label'].value_counts().to_dict()
+    test_labels = test_dataset.df['label'].value_counts().to_dict()
     
     print(f"Data Split - Train: {len(train_dataset)} slices ({len(train_patients)} patients), "
           f"Val: {len(val_dataset)} slices ({len(val_patients)} patients), "
