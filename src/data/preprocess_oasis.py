@@ -1,4 +1,4 @@
-#!/user/tmm2219/.conda/envs/qt_env/bin/python
+#!/user/tmm2219/.conda/envs/DLBI/bin/python
 import os
 import nibabel as nib
 import numpy as np
