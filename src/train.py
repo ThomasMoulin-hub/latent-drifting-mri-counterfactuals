@@ -9,6 +9,9 @@ argparse.ArgumentParser._check_help = lambda self, action: None
 import lightning as L
 import rootutils
 import torch
+
+from src.models.classifier import OASISClassifier
+torch.serialization.add_safe_globals([OASISClassifier])
 from lightning import Callback, LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.loggers import Logger
 from omegaconf import DictConfig
