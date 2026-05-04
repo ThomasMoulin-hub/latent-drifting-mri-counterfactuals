@@ -20,7 +20,7 @@ import os
 warnings.filterwarnings("ignore")
 logging.basicConfig(level=logging.INFO)
 
-def train_linear_probe(model, train_loader, val_loader, device, run_name, in_channels=3, epochs=15, lr=1e-3):
+def train_linear_probe(model, train_loader, val_loader, test_loader, device, run_name, in_channels=3, epochs=15, lr=1e-3):
     wandb.init(project="lightning-hydra-template", name=run_name, group="linear_probing", reinit=True)
     
     # Only optimize parameters that require gradients (the new classifier layer)
@@ -121,8 +121,46 @@ def train_linear_probe(model, train_loader, val_loader, device, run_name, in_cha
             "val/acc_best": best_val_acc,
         })
             
+    # --- TEST PHASE ---
+    print(f"\n--- Testing Best Model for {run_name} ---")
+    try:
+        model.load_state_dict(torch.load(f"data/pretrained/best_{run_name}.pth", weights_only=False))
+    except Exception as e:
+        print(f"Could not load best model weights for testing: {e}")
+        
+    model.eval()
+    test_correct = 0
+    test_total = 0
+    with torch.no_grad():
+        for batch in tqdm(test_loader, desc=f"[{run_name} Test]", leave=False):
+            images = batch["image"].to(device)
+            targets = batch["label"].to(device)
+            
+            images = (images + 1.0) / 2.0
+            images = torch.clamp(images, 0.0, 1.0)
+            
+            if in_channels == 3:
+                images = images.repeat(1, 3, 1, 1)
+                mean = torch.tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1).to(device)
+                std = torch.tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1).to(device)
+            else:
+                mean = torch.tensor([0.5]).view(1, 1, 1, 1).to(device)
+                std = torch.tensor([0.5]).view(1, 1, 1, 1).to(device)
+                
+            images = torch.nn.functional.interpolate(images, size=(224, 224), mode='bilinear', align_corners=False)
+            images = (images - mean) / std
+            
+            outputs = model(images)
+            _, predicted = torch.max(outputs, 1)
+            test_correct += (predicted == targets).sum().item()
+            test_total += targets.size(0)
+            
+    test_acc = test_correct / test_total
+    print(f"[{run_name}] Test Accuracy: {test_acc:.4f}\n")
+    wandb.log({"test/acc": test_acc})
+    
     wandb.finish()
-    return best_val_acc
+    return best_val_acc, test_acc
 
 def main():
     parser = argparse.ArgumentParser(description="Linear Probing for OASIS Dataset")
@@ -143,13 +181,17 @@ def main():
     dataset = OASISDataset(csv_path=csv_path, data_dir=data_dir)
     print(f"Dataset loaded with {len(dataset)} samples.")
     
-    # Split dataset 80/20
-    val_size = int(0.2 * len(dataset))
-    train_size = len(dataset) - val_size
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size], generator=torch.Generator().manual_seed(42))
+    # Split dataset 80/10/10
+    total_size = len(dataset)
+    train_size = int(0.8 * total_size)
+    val_size = int(0.1 * total_size)
+    test_size = total_size - train_size - val_size
+    
+    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size], generator=torch.Generator().manual_seed(42))
     
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=0)
+    test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False, num_workers=0)
     
     print(f"Training for {epochs} epochs with learning rate {lr}")
     
@@ -172,7 +214,7 @@ def main():
         param.requires_grad = True
         
     alz_model = alz_model.to(device)
-    alz_best_acc = train_linear_probe(alz_model, train_loader, val_loader, device, run_name="densenet_alzheimer", in_channels=1, epochs=epochs, lr=lr)
+    alz_best_acc, alz_test_acc = train_linear_probe(alz_model, train_loader, val_loader, test_loader, device, run_name="densenet_alzheimer", in_channels=1, epochs=epochs, lr=lr)
 
     # ---------------------------------------------------------
     # 2. DenseNet-121 (ImageNet Pretrained)
@@ -191,7 +233,7 @@ def main():
     imgnet_model.classifier = nn.Linear(num_ftrs, 2)
     imgnet_model = imgnet_model.to(device)
     
-    imgnet_best_acc = train_linear_probe(imgnet_model, train_loader, val_loader, device, run_name="densenet_imagenet", in_channels=3, epochs=epochs, lr=lr)
+    imgnet_best_acc, imgnet_test_acc = train_linear_probe(imgnet_model, train_loader, val_loader, test_loader, device, run_name="densenet_imagenet", in_channels=3, epochs=epochs, lr=lr)
     
     # ---------------------------------------------------------
     # 3. ResNet-50 (RadImageNet)
@@ -218,14 +260,14 @@ def main():
     )
     resnet_rad = resnet_rad.to(device)
     
-    rn_best_acc = train_linear_probe(resnet_rad, train_loader, val_loader, device, run_name="resnet_radimagenet", in_channels=3, epochs=epochs, lr=lr)
+    rn_best_acc, rn_test_acc = train_linear_probe(resnet_rad, train_loader, val_loader, test_loader, device, run_name="resnet_radimagenet", in_channels=3, epochs=epochs, lr=lr)
     
     print("\n" + "="*60)
-    print(f"FINAL LINEAR PROBING RESULTS (Trained only last layer on {len(dataset)} samples)")
+    print(f"FINAL LINEAR PROBING RESULTS (Train: {train_size}, Val: {val_size}, Test: {test_size} samples)")
     print("="*60)
-    print(f"DenseNet-121 (Alzheimer Weights) Best Val Acc : {alz_best_acc*100:.2f}%")
-    print(f"DenseNet-121 (ImageNet Weights)  Best Val Acc : {imgnet_best_acc*100:.2f}%")
-    print(f"ResNet-50    (RadImageNet)       Best Val Acc : {rn_best_acc*100:.2f}%")
+    print(f"DenseNet-121 (Alzheimer Weights) Best Val Acc : {alz_best_acc*100:.2f}%  |  Test Acc: {alz_test_acc*100:.2f}%")
+    print(f"DenseNet-121 (ImageNet Weights)  Best Val Acc : {imgnet_best_acc*100:.2f}%  |  Test Acc: {imgnet_test_acc*100:.2f}%")
+    print(f"ResNet-50    (RadImageNet)       Best Val Acc : {rn_best_acc*100:.2f}%  |  Test Acc: {rn_test_acc*100:.2f}%")
     print("="*60)
 
 if __name__ == "__main__":
