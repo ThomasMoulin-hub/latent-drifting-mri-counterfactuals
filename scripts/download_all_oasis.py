@@ -63,7 +63,7 @@ def main():
     
     # Typically there are 11 discs for OASIS-1 FreeSurfer
     # Since disc 1 is already downloaded, we can start from 2
-    for i in range(2, 12):
+    for i in range(3, 12):
         success = download_and_extract(i, base_dir)
         if not success:
             print(f"Stopping at disc {i} due to an error. (It might be the last disc).")
