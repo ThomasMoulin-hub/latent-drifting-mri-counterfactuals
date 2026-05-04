@@ -159,12 +159,22 @@ def train_head(model, train_loader, val_loader, test_loader, device, run_name, m
         print(f"Could not load best model weights for testing: {e}")
         
     model.eval()
-    test_correct = 0
-    test_total = 0
+    test_correct_slices = 0
+    test_total_slices = 0
+    
+    # Dictionaries to aggregate predictions per patient
+    patient_predictions = {}
+    patient_ground_truth = {}
+    
     with torch.no_grad():
         for batch in tqdm(test_loader, desc=f"[{run_name} Test]", leave=False):
             images = batch["image"].to(device)
             targets = batch["label"].to(device)
+            # The dataloader needs to provide patient_ids to aggregate votes.
+            # However, since test_loader uses test_dataset sequentially, we can map indices manually 
+            # if patient_id is not in the batch. Let's assume we modify the Dataset or map it here.
+            # Wait, OASISDataset __getitem__ currently doesn't return patient_id.
+            # Let's fetch it from the underlying dataframe since shuffle=False for test_loader.
             
             images = (images + 1.0) / 2.0
             images = torch.clamp(images, 0.0, 1.0)
@@ -182,15 +192,46 @@ def train_head(model, train_loader, val_loader, test_loader, device, run_name, m
             
             outputs = model(images)
             _, predicted = torch.max(outputs, 1)
-            test_correct += (predicted == targets).sum().item()
-            test_total += targets.size(0)
             
-    test_acc = test_correct / test_total
-    print(f"[{run_name}] Test Accuracy: {test_acc:.4f}\n")
-    wandb.log({"test/acc": test_acc})
+            test_correct_slices += (predicted == targets).sum().item()
+            test_total_slices += targets.size(0)
+            
+            # Aggregate for majority voting using an index counter
+            start_idx = test_total_slices - targets.size(0)
+            for i in range(targets.size(0)):
+                global_idx = start_idx + i
+                p_id = test_loader.dataset.dataset.df.iloc[test_loader.dataset.indices[global_idx]]['patient_id']
+                pred_val = predicted[i].item()
+                true_val = targets[i].item()
+                
+                if p_id not in patient_predictions:
+                    patient_predictions[p_id] = []
+                    patient_ground_truth[p_id] = true_val
+                patient_predictions[p_id].append(pred_val)
+
+    # Calculate Slice-Level Accuracy
+    slice_acc = test_correct_slices / test_total_slices
+    
+    # Calculate Patient-Level Majority Vote Accuracy
+    patient_correct = 0
+    for p_id, preds in patient_predictions.items():
+        # Majority vote: if sum of predictions (1=AD, 0=CN) > half of slices, classify as AD (1)
+        majority_vote = 1 if sum(preds) >= (len(preds) / 2.0) else 0
+        if majority_vote == patient_ground_truth[p_id]:
+            patient_correct += 1
+            
+    patient_acc = patient_correct / len(patient_predictions)
+
+    print(f"[{run_name}] Test Accuracy (Slice-level)   : {slice_acc:.4f}")
+    print(f"[{run_name}] Test Accuracy (Majority Vote) : {patient_acc:.4f}\n")
+    
+    wandb.log({
+        "test/slice_acc": slice_acc,
+        "test/patient_acc": patient_acc
+    })
     
     wandb.finish()
-    return best_val_acc, test_acc
+    return best_val_acc, patient_acc
 
 def main():
     parser = argparse.ArgumentParser(description="Head Finetuning for OASIS Dataset")
@@ -256,14 +297,18 @@ def main():
     val_labels = val_dataset.df['label'].value_counts().to_dict()
     test_labels = test_dataset.df['label'].value_counts().to_dict()
     
+    train_ages = train_dataset.df.drop_duplicates(subset=['patient_id'])['age']
+    val_ages = val_dataset.df.drop_duplicates(subset=['patient_id'])['age']
+    test_ages = test_dataset.df.drop_duplicates(subset=['patient_id'])['age']
+    
     print(f"Data Split - Train: {len(train_dataset)} slices ({len(train_patients)} patients), "
           f"Val: {len(val_dataset)} slices ({len(val_patients)} patients), "
           f"Test: {len(test_dataset)} slices ({len(test_patients)} patients)")
           
     print(f"Class Distribution (Slices):")
-    print(f"  Train: AD = {train_labels.get('AD', 0)}, CN = {train_labels.get('CN', 0)}")
-    print(f"  Val  : AD = {val_labels.get('AD', 0)}, CN = {val_labels.get('CN', 0)}")
-    print(f"  Test : AD = {test_labels.get('AD', 0)}, CN = {test_labels.get('CN', 0)}")
+    print(f"  Train: AD = {train_labels.get('AD', 0)}, CN = {train_labels.get('CN', 0)} | Age: {train_ages.mean():.1f} ± {train_ages.std():.1f}")
+    print(f"  Val  : AD = {val_labels.get('AD', 0)}, CN = {val_labels.get('CN', 0)} | Age: {val_ages.mean():.1f} ± {val_ages.std():.1f}")
+    print(f"  Test : AD = {test_labels.get('AD', 0)}, CN = {test_labels.get('CN', 0)} | Age: {test_ages.mean():.1f} ± {test_ages.std():.1f}")
     
     train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True, num_workers=3, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False, num_workers=3, pin_memory=True)
