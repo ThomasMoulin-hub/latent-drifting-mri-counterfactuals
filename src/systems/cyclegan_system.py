@@ -182,37 +182,42 @@ class CycleGANSystem(LightningModule):
 
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         real_a, real_b = self._extract_domains(batch)
-        if real_a.size(0) == 0 or real_b.size(0) == 0:
-            return None
+        
+        losses = []
+        accs = []
+        fake_b, fake_a, rec_a, rec_b = None, None, None, None
+        
+        if real_a.size(0) > 0:
+            fake_b = self.net_g_a2b(real_a)
+            rec_a = self.net_g_b2a(fake_b)
+            loss_cycle_a = self.criterion_cycle(rec_a, real_a)
+            losses.append(loss_cycle_a)
             
-        fake_b = self.net_g_a2b(real_a)
-        fake_a = self.net_g_b2a(real_b)
-        
-        rec_a = self.net_g_b2a(fake_b)
-        rec_b = self.net_g_a2b(fake_a)
-        
-        # Compute validation losses (cycle consistency)
-        loss_cycle_a = self.criterion_cycle(rec_a, real_a)
-        loss_cycle_b = self.criterion_cycle(rec_b, real_b)
-        val_loss_cycle = loss_cycle_a + loss_cycle_b
-        
-        self.log("val/loss_cycle", val_loss_cycle, on_epoch=True, prog_bar=True)
-        
-        # Evaluate deception rate if evaluator is provided
-        if self.evaluator is not None:
-            # Domain A is CN (class 0), Domain B is AD (class 1)
-            # We want fake_b (generated AD) to be classified as AD (1)
-            logits_fake_b = self.evaluator(fake_b)
-            preds_fake_b = torch.argmax(logits_fake_b, dim=1)
-            acc_fake_b = (preds_fake_b == 1).float().mean()
+            if self.evaluator is not None:
+                logits_fake_b = self.evaluator(fake_b)
+                preds_fake_b = torch.argmax(logits_fake_b, dim=1)
+                acc_fake_b = (preds_fake_b == 1).float().mean()
+                accs.append(acc_fake_b)
+                
+        if real_b.size(0) > 0:
+            fake_a = self.net_g_b2a(real_b)
+            rec_b = self.net_g_a2b(fake_a)
+            loss_cycle_b = self.criterion_cycle(rec_b, real_b)
+            losses.append(loss_cycle_b)
             
-            # We want fake_a (generated CN) to be classified as CN (0)
-            logits_fake_a = self.evaluator(fake_a)
-            preds_fake_a = torch.argmax(logits_fake_a, dim=1)
-            acc_fake_a = (preds_fake_a == 0).float().mean()
+            if self.evaluator is not None:
+                logits_fake_a = self.evaluator(fake_a)
+                preds_fake_a = torch.argmax(logits_fake_a, dim=1)
+                acc_fake_a = (preds_fake_a == 0).float().mean()
+                accs.append(acc_fake_a)
+                
+        if len(losses) > 0:
+            val_loss_cycle = sum(losses)
+            self.log("val/loss_cycle", val_loss_cycle, on_epoch=True, prog_bar=True, sync_dist=True)
             
-            deception_rate = (acc_fake_b + acc_fake_a) / 2.0
-            self.log("val/deception_rate", deception_rate, on_epoch=True, prog_bar=True)
+        if len(accs) > 0:
+            deception_rate = sum(accs) / len(accs)
+            self.log("val/deception_rate", deception_rate, on_epoch=True, prog_bar=True, sync_dist=True)
         
         # Log images to WandB on the first batch
         if batch_idx == 0 and self.logger is not None and hasattr(self.logger.experiment, "log"):
@@ -220,24 +225,24 @@ class CycleGANSystem(LightningModule):
             def to_01(t):
                 return (t + 1.0) / 2.0
                 
-            # Create a grid for Domain A -> B -> A
-            grid_a = torchvision.utils.make_grid(
-                torch.cat([to_01(real_a[:4]), to_01(fake_b[:4]), to_01(rec_a[:4])], dim=0),
-                nrow=real_a[:4].size(0)
-            )
-            
-            # Create a grid for Domain B -> A -> B
-            grid_b = torchvision.utils.make_grid(
-                torch.cat([to_01(real_b[:4]), to_01(fake_a[:4]), to_01(rec_b[:4])], dim=0),
-                nrow=real_b[:4].size(0)
-            )
-            
+            log_dict = {}
+            if real_a.size(0) > 0 and fake_b is not None and rec_a is not None:
+                grid_a = torchvision.utils.make_grid(
+                    torch.cat([to_01(real_a[:4]), to_01(fake_b[:4]), to_01(rec_a[:4])], dim=0),
+                    nrow=real_a[:4].size(0)
+                )
+                log_dict["val/images_A_to_B_to_A"] = wandb.Image(grid_a, caption="Real A, Fake B, Rec A")
+                
+            if real_b.size(0) > 0 and fake_a is not None and rec_b is not None:
+                grid_b = torchvision.utils.make_grid(
+                    torch.cat([to_01(real_b[:4]), to_01(fake_a[:4]), to_01(rec_b[:4])], dim=0),
+                    nrow=real_b[:4].size(0)
+                )
+                log_dict["val/images_B_to_A_to_B"] = wandb.Image(grid_b, caption="Real B, Fake A, Rec B")
+                
             # Note: checking __class__.__name__ to be safe against other loggers
-            if self.logger.__class__.__name__ == "WandbLogger":
+            if self.logger.__class__.__name__ == "WandbLogger" and log_dict:
                 import wandb
-                self.logger.experiment.log({
-                    "val/images_A_to_B_to_A": wandb.Image(grid_a, caption="Real A, Fake B, Rec A"),
-                    "val/images_B_to_A_to_B": wandb.Image(grid_b, caption="Real B, Fake A, Rec B")
-                })
+                self.logger.experiment.log(log_dict)
         
-        return val_loss_cycle
+        return sum(losses) if len(losses) > 0 else None

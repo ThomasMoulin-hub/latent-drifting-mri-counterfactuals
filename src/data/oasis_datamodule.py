@@ -62,7 +62,7 @@ class OASISDataModule(LightningDataModule):
             
             # Use patient-level splitting to prevent data leakage
             import numpy as np
-            unique_patients = full_dataset.df['patient_id'].unique()
+            unique_patients = full_dataset.df['patient_id'].unique().tolist()
             np.random.seed(42)
             np.random.shuffle(unique_patients)
             
@@ -74,6 +74,11 @@ class OASISDataModule(LightningDataModule):
                 # Fallback if split_lengths were passed as absolute integers (unlikely for patient split, but safe)
                 train_p_size = int(self.hparams.train_val_test_split[0])
                 val_p_size = int(self.hparams.train_val_test_split[1])
+                
+            # Safety check for small dummy datasets
+            if total_patients >= 2 and val_p_size == 0:
+                val_p_size = 1
+                train_p_size = total_patients - 1
                 
             train_patients = unique_patients[:train_p_size]
             val_patients = unique_patients[train_p_size:train_p_size + val_p_size]
