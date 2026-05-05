@@ -180,6 +180,14 @@ class CycleGANSystem(LightningModule):
         self.log("train/loss_d", loss_d, prog_bar=True, on_step=True, on_epoch=True)
         self.log("train/loss_cycle", loss_cycle_a + loss_cycle_b, on_step=True, on_epoch=True)
 
+    def _prepare_for_evaluator(self, x: torch.Tensor) -> torch.Tensor:
+        """Prepares images for the DenseNet evaluator using exact preprocessing from its training."""
+        x = (x + 1.0) / 2.0
+        x = torch.clamp(x, 0.0, 1.0)
+        x = torch.nn.functional.interpolate(x, size=(224, 224), mode='bilinear', align_corners=False)
+        x = (x - 0.5) / 0.5
+        return x
+
     def validation_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
         real_a, real_b = self._extract_domains(batch)
         
@@ -194,7 +202,8 @@ class CycleGANSystem(LightningModule):
             losses.append(loss_cycle_a)
             
             if self.evaluator is not None:
-                logits_fake_b = self.evaluator(fake_b)
+                fake_b_eval = self._prepare_for_evaluator(fake_b)
+                logits_fake_b = self.evaluator(fake_b_eval)
                 preds_fake_b = torch.argmax(logits_fake_b, dim=1)
                 acc_fake_b = (preds_fake_b == 1).float().mean()
                 accs.append(acc_fake_b)
@@ -206,7 +215,8 @@ class CycleGANSystem(LightningModule):
             losses.append(loss_cycle_b)
             
             if self.evaluator is not None:
-                logits_fake_a = self.evaluator(fake_a)
+                fake_a_eval = self._prepare_for_evaluator(fake_a)
+                logits_fake_a = self.evaluator(fake_a_eval)
                 preds_fake_a = torch.argmax(logits_fake_a, dim=1)
                 acc_fake_a = (preds_fake_a == 0).float().mean()
                 accs.append(acc_fake_a)

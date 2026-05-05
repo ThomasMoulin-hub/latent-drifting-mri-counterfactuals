@@ -40,9 +40,11 @@ class SwinUNetGenerator(nn.Module):
             x (torch.Tensor): Input tensor. Shape: (B, C_in, H, W)
             
         Returns:
-            torch.Tensor: Output tensor. Shape: (B, C_out, H, W)
+            torch.Tensor: Output tensor. Shape: (B, C_out, H, W) in range [-1, 1]
         """
         # x shape: (B, C_in, H, W)
         out = self.model(x)
         # out shape: (B, C_out, H, W)
-        return out
+        
+        # Apply Tanh to bound output between [-1, 1]
+        return torch.tanh(out)
