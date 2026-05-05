@@ -75,7 +75,7 @@ def main():
 
     # 2. Load Model
     print(f"Loading model from {args.ckpt_path}...")
-    model = CycleGANSystem.load_from_checkpoint(args.ckpt_path)
+    model = CycleGANSystem.load_from_checkpoint(args.ckpt_path, map_location=device, weights_only=False)
     model.eval()
     model.to(device)
 
