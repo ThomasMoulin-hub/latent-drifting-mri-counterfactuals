@@ -221,28 +221,33 @@ class CycleGANSystem(LightningModule):
         
         # Log images to WandB on the first batch
         if batch_idx == 0 and self.logger is not None and hasattr(self.logger.experiment, "log"):
-            # Ensure images are in [0, 1] for logging
-            def to_01(t):
-                return (t + 1.0) / 2.0
-                
-            log_dict = {}
-            if real_a.size(0) > 0 and fake_b is not None and rec_a is not None:
-                grid_a = torchvision.utils.make_grid(
-                    torch.cat([to_01(real_a[:4]), to_01(fake_b[:4]), to_01(rec_a[:4])], dim=0),
-                    nrow=real_a[:4].size(0)
-                )
-                log_dict["val/images_A_to_B_to_A"] = wandb.Image(grid_a, caption="Real A, Fake B, Rec A")
-                
-            if real_b.size(0) > 0 and fake_a is not None and rec_b is not None:
-                grid_b = torchvision.utils.make_grid(
-                    torch.cat([to_01(real_b[:4]), to_01(fake_a[:4]), to_01(rec_b[:4])], dim=0),
-                    nrow=real_b[:4].size(0)
-                )
-                log_dict["val/images_B_to_A_to_B"] = wandb.Image(grid_b, caption="Real B, Fake A, Rec B")
-                
             # Note: checking __class__.__name__ to be safe against other loggers
-            if self.logger.__class__.__name__ == "WandbLogger" and log_dict:
+            if self.logger.__class__.__name__ == "WandbLogger":
                 import wandb
-                self.logger.experiment.log(log_dict)
+                # Ensure images are in [0, 1] for logging
+                def to_01(t):
+                    return (t + 1.0) / 2.0
+                    
+                log_dict = {}
+                if real_a.size(0) > 0 and fake_b is not None and rec_a is not None:
+                    grid_a = torchvision.utils.make_grid(
+                        torch.cat([to_01(real_a[:4]), to_01(fake_b[:4]), to_01(rec_a[:4])], dim=0),
+                        nrow=real_a[:4].size(0)
+                    )
+                    log_dict["val/images_A_to_B_to_A"] = wandb.Image(grid_a, caption="Real A, Fake B, Rec A")
+                    
+                if real_b.size(0) > 0 and fake_a is not None and rec_b is not None:
+                    grid_b = torchvision.utils.make_grid(
+                        torch.cat([to_01(real_b[:4]), to_01(fake_a[:4]), to_01(rec_b[:4])], dim=0),
+                        nrow=real_b[:4].size(0)
+                    )
+                    log_dict["val/images_B_to_A_to_B"] = wandb.Image(grid_b, caption="Real B, Fake A, Rec B")
+                    
+                if log_dict:
+                    self.logger.experiment.log(log_dict)
         
         return sum(losses) if len(losses) > 0 else None
+
+    def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> None:
+        """Reuse validation logic for testing."""
+        self.validation_step(batch, batch_idx)
