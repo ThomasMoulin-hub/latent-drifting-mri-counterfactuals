@@ -15,6 +15,7 @@ from src.systems.cyclegan_system import CycleGANSystem
 from src.data.oasis_datamodule import OASISDataModule
 from src.models.swin_unet import SwinUNetGenerator
 from src.models.discriminator import PatchGANDiscriminator
+from src.models.classifier import OASISClassifier
 
 def denormalize_and_save(tensor: torch.Tensor, filepath: str):
     """
@@ -83,6 +84,7 @@ def main():
     net_g_b2a = SwinUNetGenerator(spatial_dims=2, in_channels=1, out_channels=1, feature_size=24)
     net_d_a = PatchGANDiscriminator(in_channels=1)
     net_d_b = PatchGANDiscriminator(in_channels=1)
+    evaluator = OASISClassifier(in_channels=1, num_classes=2, spatial_dims=2, pretrained=False)
     
     model = CycleGANSystem.load_from_checkpoint(
         args.ckpt_path, 
@@ -92,6 +94,7 @@ def main():
         net_g_b2a=net_g_b2a,
         net_d_a=net_d_a,
         net_d_b=net_d_b,
+        evaluator=evaluator,
         optimizer_g=None, # Dummy values since we only want to evaluate
         optimizer_d=None
     )
