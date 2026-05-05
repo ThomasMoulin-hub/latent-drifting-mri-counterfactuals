@@ -17,3 +17,11 @@ trainer:
 
 data:
   batch_size: 8
+
+callbacks:
+  model_checkpoint:
+    monitor: "val/loss_cycle"
+    mode: "min"
+  early_stopping:
+    monitor: "val/loss_cycle"
+    mode: "min"

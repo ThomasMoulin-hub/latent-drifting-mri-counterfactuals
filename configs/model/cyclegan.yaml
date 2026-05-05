@@ -46,7 +46,7 @@ evaluator:
   num_classes: 2
   spatial_dims: 2
   pretrained: true
-  weights_path: "data/pretrained/alzheimer_cnn_model.pth"
+  weights_path: "data/pretrained/best_densenet_alzheimer_linear.pth"
 
 lambda_cycle: 10.0
 lambda_identity: 0.5
