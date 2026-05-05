@@ -206,6 +206,7 @@ class CycleGANSystem(LightningModule):
                 logits_fake_b = self.evaluator(fake_b_eval)
                 preds_fake_b = torch.argmax(logits_fake_b, dim=1)
                 acc_fake_b = (preds_fake_b == 1).float().mean()
+                self.log("val/acc_fake_b", acc_fake_b, on_epoch=True, sync_dist=True)
                 accs.append(acc_fake_b)
                 
         if real_b.size(0) > 0:
@@ -219,6 +220,7 @@ class CycleGANSystem(LightningModule):
                 logits_fake_a = self.evaluator(fake_a_eval)
                 preds_fake_a = torch.argmax(logits_fake_a, dim=1)
                 acc_fake_a = (preds_fake_a == 0).float().mean()
+                self.log("val/acc_fake_a", acc_fake_a, on_epoch=True, sync_dist=True)
                 accs.append(acc_fake_a)
                 
         if len(losses) > 0:

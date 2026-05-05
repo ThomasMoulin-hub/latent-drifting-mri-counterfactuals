@@ -66,15 +66,15 @@ class OASISClassifier(nn.Module):
                 pretrained_dict = {k: v for k, v in state_dict.items() if k in model_dict and v.shape == model_dict[k].shape}
                 
                 if len(pretrained_dict) == 0:
-                    log.warning(f"No matching weights found in {weights_path}")
+                    log.warning(f"❌ No matching weights found in {weights_path}")
                 else:
                     missing_keys = set(model_dict.keys()) - set(pretrained_dict.keys())
+                    log.info(f"✅ Successfully loaded {len(pretrained_dict)}/{len(model_dict)} layers from {weights_path}")
                     if missing_keys:
-                        log.info(f"Loaded {len(pretrained_dict)} layers. Missing: {list(missing_keys)[:5]}...")
+                        log.info(f"⚠️ Missing layers (using random init): {list(missing_keys)[:10]}...")
                     
                     model_dict.update(pretrained_dict)
                     self.model.load_state_dict(model_dict)
-                    log.info(f"Successfully loaded pretrained weights from {weights_path}")
             except Exception as e:
                 log.warning(f"Could not load weights from {weights_path}: {e}. Proceeding with random weights.")
 
