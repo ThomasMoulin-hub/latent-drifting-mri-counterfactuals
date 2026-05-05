@@ -19,22 +19,16 @@ from src.models.classifier import OASISClassifier
 
 def denormalize_and_save(tensor: torch.Tensor, filepath: str):
     """
-    Takes a tensor in range [-1, 1], shifts it back so the background (0 in native space) 
-    becomes actual black (0 in 0-255 space), and saves it as a PNG.
+    Takes a tensor containing MRI data, maps the background (which is around 0.0) 
+    to true black (0) and the skull/tissue (up to 1.0) to white/gray (up to 255).
     """
-    # 1. Denormalize from [-1, 1] back to [0, 1] native FreeSurfer scale
-    # In preprocess_oasis.py, ScaleIntensity(minv=0.0, maxv=1.0) was used.
-    # But later, W&B logs used (x + 1)/2. 
-    # Let's extract exactly what CycleGAN outputs [-1, 1] and map it.
+    # The true background in the .npy files is 0.0 (or very close to it).
+    # The max value is 1.0. The min value is -1.0.
+    # If we do (x+1)/2, the background 0.0 becomes 0.5 (gray).
+    # To keep the background black, we simply discard the negative values 
+    # (which are just noise/artifacts anyway) and keep the [0, 1] range intact.
     
-    # If the background is exactly at 0 in the original npy, and CycleGAN scales to [-1, 1]
-    # Native: [0, 1] -> CycleGAN input: (x - 0.5) / 0.5 = [-1, 1]
-    # CycleGAN output: [-1, 1] -> Native: (x * 0.5) + 0.5 = [0, 1]
-    
-    img = (tensor * 0.5) + 0.5
-    
-    # Clamp just in case the generator overshot
-    img = torch.clamp(img, 0.0, 1.0)
+    img = torch.clamp(tensor, 0.0, 1.0)
     
     # Convert to 0-255
     img_np = (img.squeeze().cpu().numpy() * 255.0).astype(np.uint8)
