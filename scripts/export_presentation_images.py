@@ -13,6 +13,8 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from src.systems.cyclegan_system import CycleGANSystem
 from src.data.oasis_datamodule import OASISDataModule
+from src.models.swin_unet import SwinUNetGenerator
+from src.models.discriminator import PatchGANDiscriminator
 
 def denormalize_and_save(tensor: torch.Tensor, filepath: str):
     """
@@ -75,7 +77,24 @@ def main():
 
     # 2. Load Model
     print(f"Loading model from {args.ckpt_path}...")
-    model = CycleGANSystem.load_from_checkpoint(args.ckpt_path, map_location=device, weights_only=False)
+    
+    # We must instantiate the networks manually because they were ignored in save_hyperparameters
+    net_g_a2b = SwinUNetGenerator(spatial_dims=2, in_channels=1, out_channels=1, feature_size=24)
+    net_g_b2a = SwinUNetGenerator(spatial_dims=2, in_channels=1, out_channels=1, feature_size=24)
+    net_d_a = PatchGANDiscriminator(in_channels=1)
+    net_d_b = PatchGANDiscriminator(in_channels=1)
+    
+    model = CycleGANSystem.load_from_checkpoint(
+        args.ckpt_path, 
+        map_location=device, 
+        weights_only=False,
+        net_g_a2b=net_g_a2b,
+        net_g_b2a=net_g_b2a,
+        net_d_a=net_d_a,
+        net_d_b=net_d_b,
+        optimizer_g=None, # Dummy values since we only want to evaluate
+        optimizer_d=None
+    )
     model.eval()
     model.to(device)
 
