@@ -234,14 +234,18 @@ class CycleGANSystem(LightningModule):
                         torch.cat([to_01(real_a[:4]), to_01(fake_b[:4]), to_01(rec_a[:4])], dim=0),
                         nrow=real_a[:4].size(0)
                     )
-                    log_dict["val/images_A_to_B_to_A"] = wandb.Image(grid_a.cpu().detach(), caption="Real A, Fake B, Rec A")
+                    # Convert from CHW to HWC for WandB
+                    grid_a_np = grid_a.cpu().detach().permute(1, 2, 0).numpy()
+                    log_dict["val/images_A_to_B_to_A"] = wandb.Image(grid_a_np, caption="Real A, Fake B, Rec A")
                     
                 if real_b.size(0) > 0 and fake_a is not None and rec_b is not None:
                     grid_b = torchvision.utils.make_grid(
                         torch.cat([to_01(real_b[:4]), to_01(fake_a[:4]), to_01(rec_b[:4])], dim=0),
                         nrow=real_b[:4].size(0)
                     )
-                    log_dict["val/images_B_to_A_to_B"] = wandb.Image(grid_b.cpu().detach(), caption="Real B, Fake A, Rec B")
+                    # Convert from CHW to HWC for WandB
+                    grid_b_np = grid_b.cpu().detach().permute(1, 2, 0).numpy()
+                    log_dict["val/images_B_to_A_to_B"] = wandb.Image(grid_b_np, caption="Real B, Fake A, Rec B")
                     
                 if log_dict:
                     self.logger.experiment.log(log_dict)
