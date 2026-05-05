@@ -200,7 +200,7 @@ def train_head(model, train_loader, val_loader, test_loader, device, run_name, m
             start_idx = test_total_slices - targets.size(0)
             for i in range(targets.size(0)):
                 global_idx = start_idx + i
-                p_id = test_loader.dataset.dataset.df.iloc[test_loader.dataset.indices[global_idx]]['patient_id']
+                p_id = test_loader.dataset.df.iloc[global_idx]['patient_id']
                 pred_val = predicted[i].item()
                 true_val = targets[i].item()
                 
