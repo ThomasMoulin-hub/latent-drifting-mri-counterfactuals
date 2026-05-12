@@ -110,6 +110,10 @@ class DiffusionSystem(LightningModule):
         self.log("val/loss_diff", loss_diff, on_step=False, on_epoch=True, prog_bar=True)
         return loss_diff
 
+    def test_step(self, batch: Dict[str, torch.Tensor], batch_idx: int) -> torch.Tensor:
+        """Reuse validation logic for testing."""
+        return self.validation_step(batch, batch_idx)
+
     @torch.no_grad()
     def interpolate_conditions(self, c_start: torch.Tensor, c_end: torch.Tensor, steps: int) -> torch.Tensor:
         """
