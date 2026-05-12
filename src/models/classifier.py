@@ -8,7 +8,7 @@ log = logging.getLogger(__name__)
 class OASISClassifier(nn.Module):
     """
     2D Classifier for OASIS AD vs CN slices.
-    Uses ResNet50, optimized for the Alzheimer's Detection task.
+    Uses DenseNet121, optimized for the Alzheimer's Detection task.
     
     Pretrained Model Reference:
     This model utilizes or is inspired by the pretrained weights from:
