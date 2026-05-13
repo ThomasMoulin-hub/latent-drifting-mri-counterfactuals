@@ -7,6 +7,11 @@ A comprehensive IEEE-formatted conference paper detailing the methodology, archi
 
 **[Read the Project Report (PDF)](./Project%20Report%20-%20Thomas%20Moulin.pdf)**
 
+## Technical Documentation
+For developers looking to understand the codebase, architecture, data models, or how to run specific environments, please refer to the master documentation index:
+
+**[Explore the Code Documentation](./docs/index.md)**
+
 ---
 
 ## Quick Start
